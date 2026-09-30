@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="EduGenie - AI-powered learning assistant" />
+  <title>EduGenie | Learning Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" />
+</head>
+<body>
+  <main class="container">
+    <header class="hero">
+      <div class="badge">AI Learning Assistant</div>
+      <h1>EduGenie</h1>
+      <p>Ask, understand, practice, summarize, and plan your learning with AI.</p>
+    </header>
+
+    <section class="card">
+      <label for="task">Choose a task</label>
+      <select id="task">
+        <option value="qa">Ask a Question</option>
+        <option value="explain">Explain a Topic</option>
+        <option value="quiz">Generate Quiz</option>
+        <option value="summarize">Summarize Text</option>
+        <option value="learn">Learning Path</option>
+      </select>
+
+      <label for="inputText" id="inputLabel">Your question</label>
+      <textarea id="inputText" rows="9" placeholder="Example: What is the largest ocean?"></textarea>
+
+      <div class="actions">
+        <button id="submitBtn" type="button">Generate</button>
+        <button id="clearBtn" type="button" class="secondary">Clear</button>
+      </div>
+
+      <p id="status" class="status" aria-live="polite"></p>
+    </section>
+
+    <section id="resultCard" class="card result-card hidden">
+      <div class="result-header">
+        <h2>Result</h2>
+        <button id="copyBtn" type="button" class="secondary small">Copy</button>
+      </div>
+      <div id="result"></div>
+    </section>
+  </main>
+
+  <script>
+    const task = document.getElementById("task");
+    const inputText = document.getElementById("inputText");
+    const inputLabel = document.getElementById("inputLabel");
+    const submitBtn = document.getElementById("submitBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const copyBtn = document.getElementById("copyBtn");
+    const resultCard = document.getElementById("resultCard");
+    const result = document.getElementById("result");
+    const status = document.getElementById("status");
+
+    const settings = {
+      qa: {
+        label: "Your question",
+        placeholder: "Example: What is the largest ocean?",
+      },
+      explain: {
+        label: "Topic to explain",
+        placeholder: "Example: Explain the Pythagoras theorem simply.",
+      },
+      quiz: {
+        label: "Passage or topic",
+        placeholder: "Paste a passage or describe a topic for 3 MCQs.",
+      },
+      summarize: {
+        label: "Text to summarize",
+        placeholder: "Paste the educational passage you want summarized.",
+      },
+      learn: {
+        label: "Topic to learn",
+        placeholder: "Example: SQL from beginner to advanced.",
+      }
+    };
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function updateTaskHelp() {
+      const current = settings[task.value];
+      inputLabel.textContent = current.label;
+      inputText.placeholder = current.placeholder;
+    }
+
+    function showError(message) {
+      resultCard.classList.remove("hidden");
+      result.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+    }
+
+    function renderText(text) {
+      const safe = escapeHtml(text);
+      result.innerHTML = `<div class="answer">${safe.replaceAll("\n", "<br>")}</div>`;
+    }
+
+    function renderQuiz(questions) {
+      result.innerHTML = "";
+      const quiz = document.createElement("div");
+      quiz.className = "quiz";
+
+      questions.forEach((q, index) => {
+        const wrapper = document.createElement("article");
+        wrapper.className = "quiz-question";
+        wrapper.innerHTML = `
+          <h3>${index + 1}. ${escapeHtml(q.question)}</h3>
+          <div class="options"></div>
+          <div class="feedback" id="feedback-${q.id}"></div>
+        `;
+
+        const options = wrapper.querySelector(".options");
+        q.options.forEach((option) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "option";
+          button.textContent = option;
+          button.addEventListener("click", () => {
+            const feedback = document.getElementById(`feedback-${q.id}`);
+            [...options.children].forEach((item) => item.disabled = true);
+
+            if (option === q.answer) {
+              feedback.className = "feedback correct";
+              feedback.innerHTML = `<strong>Correct!</strong> ${escapeHtml(q.explanation || "")}`;
+            } else {
+              feedback.className = "feedback wrong";
+              feedback.innerHTML =
+                `<strong>Not quite.</strong> Correct answer: <b>${escapeHtml(q.answer)}</b>` +
+                (q.explanation ? `<br>${escapeHtml(q.explanation)}` : "");
+            }
+          });
+          options.appendChild(button);
+        });
+
+        quiz.appendChild(wrapper);
+      });
+
+      result.appendChild(quiz);
+    }
+
+    async function submit() {
+      const value = inputText.value.trim();
+      if (!value) {
+        showError("Please enter a question, topic, or passage.");
+        return;
+      }
+
+      submitBtn.disabled = true;
+      status.textContent = "EduGenie is thinking...";
+      resultCard.classList.add("hidden");
+
+      const endpoint = {
+        qa: "/qa",
+        explain: "/explain",
+        quiz: "/quiz",
+        summarize: "/summarize",
+        learn: "/learn/recommendations",
+      }[task.value];
+
+      const body = task.value === "qa"
+        ? { question: value }
+        : { text: value };
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.detail || "The server returned an error.");
+        }
+
+        resultCard.classList.remove("hidden");
+        if (task.value === "quiz") {
+          renderQuiz(data.quiz);
+        } else {
+          renderText(data.answer || data.summary || data.recommendations || "");
+        }
+
+        status.textContent = "Completed.";
+      } catch (error) {
+        status.textContent = "Something went wrong.";
+        showError(error.message);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
+
+    task.addEventListener("change", updateTaskHelp);
+    submitBtn.addEventListener("click", submit);
+
+    clearBtn.addEventListener("click", () => {
+      inputText.value = "";
+      result.innerHTML = "";
+      resultCard.classList.add("hidden");
+      status.textContent = "";
+      inputText.focus();
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      const text = result.innerText.trim();
+      if (!text) return;
+      await navigator.clipboard.writeText(text);
+      status.textContent = "Result copied.";
+    });
+
+    inputText.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        submit();
+      }
+    });
+
+    updateTaskHelp();
+  </script>
+</body>
+</html>
